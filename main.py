@@ -7,7 +7,7 @@ from io import BytesIO
 import torch
 import whisper
 import edge_tts
-from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -141,7 +141,7 @@ async def transcribe_file(
 
 @app.get("/tts/voices", response_model=VoicesResponse)
 async def list_voices(
-    language: Optional[str] = None
+    language: Optional[str] = Query(None, description="按语言筛选 (如: zh-CN, en-US, ja-JP)")
 ):
     """
     列出所有可用的 TTS 声音
