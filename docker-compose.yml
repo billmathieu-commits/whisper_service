@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  whisper-service:
+    build: .
+    container_name: whisper-stt-service
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_SIZE=base  # 可选: tiny, base, small, medium, large
+      - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    volumes:
+      # 可选：挂载缓存目录以加速模型加载
+      - whisper-cache:/root/.cache/whisper
+    restart: unless-stopped
+    runtime: nvidia
+
+volumes:
+  whisper-cache:
+    driver: local
