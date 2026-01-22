@@ -7,6 +7,7 @@ from io import BytesIO
 import torch
 import whisper
 import edge_tts
+import opencc
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -125,9 +126,22 @@ async def transcribe_file(
         audio = whisper.load_audio(temp_file_path)
         duration = len(audio) / whisper.audio.SAMPLE_RATE
 
+        # 转换为简体中文
+        text = result["text"].strip()
+        detected_language = result.get("language")
+
+        # 如果是中文，转换为简体
+        if detected_language and detected_language.startswith("zh"):
+            try:
+                cc = opencc.OpenCC('t2s')  # 繁体转简体
+                text = cc.convert(text)
+            except Exception:
+                # 如果转换失败，使用原文
+                pass
+
         return TranscribeResponse(
-            text=result["text"].strip(),
-            language=result.get("language"),
+            text=text,
+            language=detected_language,
             duration=duration
         )
 
