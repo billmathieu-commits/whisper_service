@@ -78,7 +78,7 @@ async def health_check():
     )
 
 
-@app.post("/transcribe", response_model=TranscribeResponse)
+@app.post("/stt/transcribe", response_model=TranscribeResponse)
 async def transcribe_file(
     file: UploadFile = File(..., description="音频文件"),
     language: Optional[str] = Form(None, description="语言代码 (如: zh, en, ja)，自动检测则为空"),
@@ -153,7 +153,7 @@ async def transcribe_file(
             os.remove(temp_file_path)
 
 
-@app.get("/voices", response_model=VoicesResponse)
+@app.get("/tts/voices", response_model=VoicesResponse)
 async def list_voices(
     language: Optional[str] = Query(None, description="按语言筛选 (如: zh-CN, en-US, ja-JP)")
 ):
@@ -185,7 +185,7 @@ async def list_voices(
         raise HTTPException(status_code=500, detail=f"Failed to list voices: {str(e)}")
 
 
-@app.post("/synthesize")
+@app.post("/tts/synthesize")
 async def text_to_speech(
     text: str = Form(..., description="要转换的文本"),
     voice: str = Form("zh-CN-XiaoxiaoNeural", description="TTS 声音名称"),
