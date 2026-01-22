@@ -7,7 +7,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - MODEL_SIZE=base  # 可选: tiny, base, small, medium, large
+      - MODEL_SIZE=large  # 可选: tiny, base, small, medium, large
       - NVIDIA_VISIBLE_DEVICES=all
     deploy:
       resources:
