@@ -1,15 +1,26 @@
-# Whisper STT Service
+# Speech Service
 
-基于 FastAPI + OpenAI Whisper 的语音转文本（STT）服务，支持 GPU 加速，使用 Docker 部署。
+基于 FastAPI 的语音服务，集成了 OpenAI Whisper 的语音转文本（STT）和 Microsoft Edge TTS 的文字转语音（TTS），支持 GPU 加速，使用 Docker 部署。
 
 ## 特性
 
+### STT (语音转文本)
 - 基于 OpenAI Whisper 模型
 - 支持 NVIDIA GPU 加速（RTX 5090D 等显卡）
-- Docker 容器化部署
-- RESTful API 接口
 - 支持多语言转录和翻译
 - 支持多种音频格式（wav, mp3, m4a, ogg, flac 等）
+
+### TTS (文字转语音)
+- 基于 Microsoft Edge TTS（edge-tts）
+- 无需 API key，完全免费
+- 支持多种语言和声音
+- 可调节语速、音量、音调
+- 高质量音频输出
+
+### 通用特性
+- Docker 容器化部署
+- RESTful API 接口
+- 完整的 API 文档（Swagger UI）
 
 ## 系统要求
 
@@ -170,6 +181,112 @@ fetch('http://localhost:8000/transcribe', {
 .then(data => console.log(data.text));
 ```
 
+### TTS (文字转语音)
+
+#### 列出可用声音
+
+```bash
+# 列出所有声音
+curl "http://localhost:8000/tts/voices"
+
+# 按语言筛选
+curl "http://localhost:8000/tts/voices?language=zh-CN"
+```
+
+#### 合成语音
+
+```bash
+curl -X POST "http://localhost:8000/tts/synthesize" \
+  -F "text=你好，世界！" \
+  -F "voice=zh-CN-XiaoxiaoNeural" \
+  --output hello.mp3
+```
+
+**参数说明：**
+- `text`: 要转换的文本（必需，最多 5000 字符）
+- `voice`: TTS 声音名称（可选，默认 `zh-CN-XiaoxiaoNeural`）
+- `rate`: 语速调整（可选，如 `+10%`, `-20%`，默认 `+0%`）
+- `volume`: 音量调整（可选，如 `+10%`, `-20%`，默认 `+0%`）
+- `pitch`: 音调调整（可选，如 `+50Hz`, `-50Hz`，默认 `+0Hz`）
+
+**常用声音：**
+- 中文女声: `zh-CN-XiaoxiaoNeural`
+- 中文男声: `zh-CN-YunyangNeural`
+- 英文女声: `en-US-JennyNeural`
+- 英文男声: `en-US-GuyNeural`
+- 日文女声: `ja-JP-NanamiNeural`
+
+使用 `/tts/voices` 接口查看所有可用声音。
+
+### TTS Python 客户端示例
+
+使用提供的 TTS 测试脚本：
+
+```bash
+# 列出所有声音
+python test_tts_client.py --list-voices
+
+# 列出中文声音
+python test_tts_client.py --list-voices --language zh-CN
+
+# 合成语音（默认参数）
+python test_tts_client.py --text "你好，世界！"
+
+# 合成语音（自定义声音和参数）
+python test_tts_client.py --text "Hello, world!" \
+  --voice en-US-JennyNeural \
+  --rate=+20% \
+  --volume=+10% \
+  --output hello.mp3
+```
+
+### TTS Python 代码示例
+
+```python
+import requests
+
+# 合成语音
+data = {
+    "text": "你好，世界！",
+    "voice": "zh-CN-XiaoxiaoNeural",
+    "rate": "+10%",
+    "volume": "+5%",
+    "pitch": "+0Hz"
+}
+
+response = requests.post("http://localhost:8000/tts/synthesize", data=data)
+
+if response.status_code == 200:
+    with open("output.mp3", "wb") as f:
+        f.write(response.content)
+    print("语音合成成功！")
+else:
+    print(f"错误: {response.text}")
+```
+
+### TTS JavaScript 示例
+
+```javascript
+const formData = new FormData();
+formData.append('text', '你好，世界！');
+formData.append('voice', 'zh-CN-XiaoxiaoNeural');
+formData.append('rate', '+10%');
+
+fetch('http://localhost:8000/tts/synthesize', {
+  method: 'POST',
+  body: formData
+})
+.then(response => response.blob())
+.then(blob => {
+  // 创建下载链接
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'output.mp3';
+  a.click();
+});
+```
+
 ## 性能优化
 
 ### GPU 加速
@@ -272,7 +389,8 @@ docker-compose logs --tail=100
 ```
 whisper_service/
 ├── main.py                 # FastAPI 主应用
-├── test_client.py          # 测试客户端
+├── test_client.py          # STT 测试客户端
+├── test_tts_client.py      # TTS 测试客户端
 ├── Dockerfile              # Docker 镜像定义
 ├── docker-compose.yml      # Docker Compose 配置
 ├── requirements.txt        # Python 依赖
@@ -287,5 +405,6 @@ MIT License
 ## 参考
 
 - [OpenAI Whisper](https://github.com/openai/whisper)
+- [edge-tts](https://github.com/rany2/edge-tts)
 - [FastAPI](https://fastapi.tiangolo.com/)
 - [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/index.html)

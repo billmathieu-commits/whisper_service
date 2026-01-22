@@ -2,11 +2,13 @@ import os
 import tempfile
 from pathlib import Path
 from typing import Optional, Literal
+from io import BytesIO
 
 import torch
 import whisper
+import edge_tts
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 # 配置
@@ -14,8 +16,8 @@ MODEL_SIZE = os.getenv("MODEL_SIZE", "base")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 app = FastAPI(
-    title="Whisper STT Service",
-    description="Speech-to-Text service using OpenAI Whisper with GPU acceleration",
+    title="Speech Service",
+    description="Speech-to-Text (Whisper) and Text-to-Speech (Edge TTS) service with GPU acceleration",
     version="1.0.0"
 )
 
@@ -34,6 +36,18 @@ class HealthResponse(BaseModel):
     model_size: str
     device: str
     cuda_available: bool
+
+
+class VoiceInfo(BaseModel):
+    name: str
+    gender: str
+    language: str
+    description: Optional[str] = None
+
+
+class VoicesResponse(BaseModel):
+    voices: list[VoiceInfo]
+    count: int
 
 
 def load_model():
@@ -125,14 +139,109 @@ async def transcribe_file(
             os.remove(temp_file_path)
 
 
+@app.get("/tts/voices", response_model=VoicesResponse)
+async def list_voices(
+    language: Optional[str] = None
+):
+    """
+    列出所有可用的 TTS 声音
+
+    参数:
+    - language: 可选，按语言筛选 (如: zh-CN, en-US, ja-JP)
+    """
+    try:
+        voices = await edge_tts.list_voices()
+
+        # 筛选声音
+        if language:
+            voices = [v for v in voices if v.get("Locale", "").startswith(language)]
+
+        # 格式化响应
+        voice_list = []
+        for voice in voices:
+            voice_list.append(VoiceInfo(
+                name=voice.get("Name", ""),
+                gender=voice.get("Gender", ""),
+                language=voice.get("Locale", ""),
+                description=voice.get("Description", "")
+            ))
+
+        return VoicesResponse(voices=voice_list, count=len(voice_list))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list voices: {str(e)}")
+
+
+@app.post("/tts/synthesize")
+async def text_to_speech(
+    text: str = Form(..., description="要转换的文本"),
+    voice: str = Form("zh-CN-XiaoxiaoNeural", description="TTS 声音名称"),
+    rate: str = Form("+0%", description="语速调整 (如: +10%, -20%)"),
+    volume: str = Form("+0%", description="音量调整 (如: +10%, -20%)"),
+    pitch: str = Form("+0Hz", description="音调调整 (如: +50Hz, -50Hz)"),
+):
+    """
+    文字转语音 (Text-to-Speech)
+
+    返回 MP3 格式的音频文件
+
+    常用声音:
+    - 中文女声: zh-CN-XiaoxiaoNeural
+    - 中文男声: zh-CN-YunyangNeural
+    - 英文女声: en-US-JennyNeural
+    - 英文男声: en-US-GuyNeural
+    - 日文女声: ja-JP-NanamiNeural
+
+    使用 /tts/voices 查看所有可用声音
+    """
+    if not text or len(text.strip()) == 0:
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+
+    if len(text) > 5000:
+        raise HTTPException(status_code=400, detail="Text too long (max 5000 characters)")
+
+    try:
+        # 创建 TTS communicate 对象
+        communicate = edge_tts.Communicate(
+            text=text,
+            voice=voice,
+            rate=rate,
+            volume=volume,
+            pitch=pitch
+        )
+
+        # 生成音频数据
+        audio_data = b""
+        async for chunk in communicate.stream():
+            if chunk["type"] == "audio":
+                audio_data += chunk["data"]
+
+        if not audio_data:
+            raise HTTPException(status_code=500, detail="Failed to generate audio")
+
+        # 返回音频流
+        return StreamingResponse(
+            BytesIO(audio_data),
+            media_type="audio/mpeg",
+            headers={
+                "Content-Disposition": f"attachment; filename=tts_output.mp3",
+                "Content-Length": str(len(audio_data))
+            }
+        )
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"TTS error: {str(e)}")
+
+
 @app.get("/")
 async def root():
     """根路径"""
     return {
-        "message": "Whisper STT Service",
+        "message": "Speech Service (STT + TTS)",
         "endpoints": {
             "health": "/health",
-            "transcribe": "/transcribe (POST)",
+            "stt": "/transcribe (POST)",
+            "tts": "/tts/synthesize (POST)",
+            "voices": "/tts/voices",
             "docs": "/docs"
         }
     }
