@@ -114,6 +114,11 @@ async def transcribe_file(
         # 转录音频
         options = {
             "task": task,
+            "temperature": 0.0,
+            "beam_size": 1,
+            "no_speech_threshold": 0.6,
+            "logprob_threshold": -1.5,
+            "condition_on_previous_text": False
         }
 
         # 如果指定了语言，添加到选项中
