@@ -25,6 +25,26 @@ app = FastAPI(
 # 全局模型变量
 model = None
 
+HALLUCINATION_SET = {
+    "thank you",
+    "thanks",
+    "thank you.",
+    "okay",
+    "ok",
+    "bye",
+    "goodbye",
+    "嗯",
+    "啊",
+    "哦",
+    "好的",
+    "谢谢",
+    "再见",
+}
+
+def is_hallucination(text: str) -> bool:
+    t = text.lower().strip(".").strip(",").strip("?").split("。")
+    return t in HALLUCINATION_SET
+
 
 class TranscribeResponse(BaseModel):
     text: str
@@ -113,12 +133,7 @@ async def transcribe_file(
 
         # 转录音频
         options = {
-            "task": task,
-            "temperature": 0.0,
-            "beam_size": 1,
-            "no_speech_threshold": 0.6,
-            "logprob_threshold": -1.5,
-            "condition_on_previous_text": False
+            "task": task
         }
 
         # 如果指定了语言，添加到选项中
@@ -143,6 +158,9 @@ async def transcribe_file(
             except Exception:
                 # 如果转换失败，使用原文
                 pass
+
+        if is_hallucination(text):
+            text = ""
 
         return TranscribeResponse(
             text=text,
