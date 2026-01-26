@@ -42,8 +42,12 @@ HALLUCINATION_SET = {
 }
 
 def is_hallucination(text: str) -> bool:
-    t = text.lower().strip(".").strip(",").strip("?").split("。")
-    return t in HALLUCINATION_SET
+    # Check if any part of the text (split by Chinese period) is in the hallucination set
+    parts = text.lower().strip(".").strip(",").strip("?").split("。")
+    for part in parts:
+        if part.strip() in HALLUCINATION_SET:
+            return True
+    return False
 
 
 class TranscribeResponse(BaseModel):
