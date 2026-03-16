@@ -17,11 +17,19 @@ services:
               count: all
               capabilities: [gpu]
     volumes:
-      # 可选：挂载缓存目录以加速模型加载
+      # 挂载缓存目录以加速模型加载
+      # Whisper 模型缓存
       - whisper-cache:/root/.cache/whisper
+      # Chat TTS 模型缓存
+      - chattts-cache:/root/.cache/huggingface
+      # 临时文件目录
+      - tmp-cache:/tmp
     restart: unless-stopped
-    runtime: nvidia
 
 volumes:
   whisper-cache:
+    driver: local
+  chattts-cache:
+    driver: local
+  tmp-cache:
     driver: local

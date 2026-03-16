@@ -8,6 +8,9 @@ import torch
 import whisper
 import edge_tts
 import opencc
+import ChatTTS
+import numpy as np
+import soundfile as sf
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
@@ -24,6 +27,7 @@ app = FastAPI(
 
 # 全局模型变量
 model = None
+chat_tts = None
 
 HALLUCINATION_SET = {
     "thank you",
@@ -85,10 +89,22 @@ def load_model():
     return model
 
 
+def load_chat_tts():
+    """加载 Chat TTS 模型"""
+    global chat_tts
+    if chat_tts is None:
+        print(f"Loading Chat TTS model on {DEVICE}...")
+        chat_tts = ChatTTS.Chat()
+        chat_tts.load_models(device=DEVICE)
+        print(f"Chat TTS model loaded successfully!")
+    return chat_tts
+
+
 @app.on_event("startup")
 async def startup_event():
     """应用启动时加载模型"""
     load_model()
+    load_chat_tts()
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -215,24 +231,26 @@ async def list_voices(
 @app.post("/tts/synthesize")
 async def text_to_speech(
     text: str = Form(..., description="要转换的文本"),
-    voice: str = Form("zh-CN-XiaoxiaoNeural", description="TTS 声音名称"),
-    rate: str = Form("+0%", description="语速调整 (如: +10%, -20%)"),
-    volume: str = Form("+0%", description="音量调整 (如: +10%, -20%)"),
-    pitch: str = Form("+0Hz", description="音调调整 (如: +50Hz, -50Hz)"),
+    voice: int = Form(0, description="音色ID (0: 女声, 1: 男声)"),
+    speed: float = Form(1.0, description="语速 (0.5-2.0, 默认1.0)"),
+    temperature: float = Form(0.3, description="随机性 (0.1-1.0, 默认0.3)"),
+    top_p: float = Form(0.7, description="top_p采样 (0.1-1.0, 默认0.7)"),
+    top_k: int = Form(20, description="top_k采样 (1-50, 默认20)"),
 ):
     """
-    文字转语音 (Text-to-Speech)
+    文字转语音 (Text-to-Speech) 使用 Chat TTS
 
-    返回 MP3 格式的音频文件
+    返回 WAV 格式的音频文件
 
-    常用声音:
-    - 中文女声: zh-CN-XiaoxiaoNeural
-    - 中文男声: zh-CN-YunyangNeural
-    - 英文女声: en-US-JennyNeural
-    - 英文男声: en-US-GuyNeural
-    - 日文女声: ja-JP-NanamiNeural
-
-    使用 /tts/voices 查看所有可用声音
+    参数说明:
+    - text: 要转换的文本内容
+    - voice: 音色ID
+      - 0: 女声 (默认)
+      - 1: 男声
+    - speed: 语速控制，范围 0.5-2.0，默认 1.0
+    - temperature: 随机性控制，范围 0.1-1.0，默认 0.3，值越高越随机
+    - top_p: 核采样参数，范围 0.1-1.0，默认 0.7
+    - top_k: top_k采样参数，范围 1-50，默认 20
     """
     if not text or len(text.strip()) == 0:
         raise HTTPException(status_code=400, detail="Text cannot be empty")
@@ -240,21 +258,61 @@ async def text_to_speech(
     if len(text) > 5000:
         raise HTTPException(status_code=400, detail="Text too long (max 5000 characters)")
 
+    # 验证参数范围
+    if not 0.5 <= speed <= 2.0:
+        raise HTTPException(status_code=400, detail="Speed must be between 0.5 and 2.0")
+    if not 0.1 <= temperature <= 1.0:
+        raise HTTPException(status_code=400, detail="Temperature must be between 0.1 and 1.0")
+    if not 0.1 <= top_p <= 1.0:
+        raise HTTPException(status_code=400, detail="Top_p must be between 0.1 and 1.0")
+    if not 1 <= top_k <= 50:
+        raise HTTPException(status_code=400, detail="Top_k must be between 1 and 50")
+    if voice not in [0, 1]:
+        raise HTTPException(status_code=400, detail="Voice must be 0 (female) or 1 (male)")
+
     try:
-        # 创建 TTS communicate 对象
-        communicate = edge_tts.Communicate(
-            text=text,
-            voice=voice,
-            rate=rate,
-            volume=volume,
-            pitch=pitch
+        # 加载 Chat TTS 模型
+        chat_tts_model = load_chat_tts()
+
+        # 设置随机种子以获得一致的结果
+        seed = 42  # 固定种子，可以根据需要改为随机数
+
+        # 生成音频
+        wavs = chat_tts_model.infer(
+            [text],
+            skip_refine_text=True,
+            params_infer_code={
+                'spk_emb': chat_tts_model.spk_emb[voice] if hasattr(chat_tts_model, 'spk_emb') else None,
+                'temperature': temperature,
+                'top_P': top_p,
+                'top_K': top_k,
+                'manual_seed': seed,
+            },
+            params_refine_text={
+                'prompt': '[oral_2][laugh_0][break_6]',
+            },
         )
 
-        # 生成音频数据
-        audio_data = b""
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_data += chunk["data"]
+        # 获取生成的音频
+        audio_array = wavs[0]
+
+        # 应用速度调整（通过重采样）
+        if speed != 1.0:
+            import librosa
+            audio_array = librosa.effects.time_stretch(audio_array, rate=speed)
+
+        # 将音频转换为 WAV 格式
+        # 创建临时文件来保存 WAV
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as temp_wav:
+            sf.write(temp_wav.name, audio_array, 24000)  # Chat TTS 使用 24kHz 采样率
+            temp_wav_path = temp_wav.name
+
+        # 读取 WAV 文件
+        with open(temp_wav_path, 'rb') as f:
+            audio_data = f.read()
+
+        # 清理临时文件
+        os.remove(temp_wav_path)
 
         if not audio_data:
             raise HTTPException(status_code=500, detail="Failed to generate audio")
@@ -262,9 +320,9 @@ async def text_to_speech(
         # 返回音频流
         return StreamingResponse(
             BytesIO(audio_data),
-            media_type="audio/mpeg",
+            media_type="audio/wav",
             headers={
-                "Content-Disposition": f"attachment; filename=tts_output.mp3",
+                "Content-Disposition": f"attachment; filename=tts_output.wav",
                 "Content-Length": str(len(audio_data))
             }
         )
